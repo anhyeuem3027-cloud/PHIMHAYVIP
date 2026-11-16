@@ -1,0 +1,24 @@
+
+name: PHIMHAYVIP
+
+options:
+  bundleIdPrefix: vn.io.phimhayvip
+  deploymentTarget:
+    iOS: "15.0"
+
+targets:
+  PHIMHAYVIP:
+    type: application
+    platform: iOS
+    sources:
+      - path: PHIMHAYVIP
+        excludes:
+          - PHIMHAYVIP/.github/**
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: vn.io.phimhayvip.app
+        INFOPLIST_FILE: PHIMHAYVIP/PHIMHAYVIP/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGNING_ALLOWED: "NO"
