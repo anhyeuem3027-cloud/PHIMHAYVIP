@@ -4,6 +4,9 @@ name: Build unsigned IPA
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: macos-latest
@@ -27,51 +30,93 @@ jobs:
             -scheme PHIMHAYVIP \
             -configuration Release \
             -sdk iphoneos \
-            -derivedDataPath "$PWD/build" \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             clean build
 
-      - name: Verify and package IPA
+      - name: Verify and repair app metadata
         run: |
           set -euo pipefail
 
-          APP_PATH="$PWD/build/Build/Products/Release-iphoneos/PHIMHAYVIP.app"
+          APP="build/Build/Products/Release-iphoneos/PHIMHAYVIP.app"
+          PLIST="$APP/Info.plist"
 
-          if [ ! -d "$APP_PATH" ]; then
-            echo "ERROR: PHIMHAYVIP.app not found"
+          test -d "$APP" || {
+            echo "::error::PHIMHAYVIP.app not found"
+            exit 1
+          }
+
+          test -f "$PLIST" || {
+            echo "::error::Info.plist not found"
+            exit 1
+          }
+
+          echo "Checking executable..."
+
+          EXECUTABLE=$(/usr/libexec/PlistBuddy \
+            -c "Print :CFBundleExecutable" "$PLIST" 2>/dev/null || true)
+
+          if [ -z "$EXECUTABLE" ]; then
+            if [ -f "$APP/PHIMHAYVIP" ]; then
+              EXECUTABLE="PHIMHAYVIP"
+            else
+              echo "::error::Cannot find PHIMHAYVIP executable"
+              echo "App bundle contents:"
+              ls -la "$APP"
+              exit 1
+            fi
+
+            /usr/libexec/PlistBuddy \
+              -c "Add :CFBundleExecutable string $EXECUTABLE" "$PLIST"
+          fi
+
+          if [ ! -f "$APP/$EXECUTABLE" ]; then
+            echo "::error::Executable not found: $APP/$EXECUTABLE"
+            ls -la "$APP"
             exit 1
           fi
 
-          INFO_PLIST="$APP_PATH/Info.plist"
+          PACKAGE_TYPE=$(/usr/libexec/PlistBuddy \
+            -c "Print :CFBundlePackageType" "$PLIST" 2>/dev/null || true)
 
-          if [ ! -f "$INFO_PLIST" ]; then
-            echo "ERROR: Info.plist missing"
-            exit 1
+          if [ -z "$PACKAGE_TYPE" ]; then
+            /usr/libexec/PlistBuddy \
+              -c "Add :CFBundlePackageType string APPL" "$PLIST"
           fi
 
-          EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$INFO_PLIST")
+          echo "Executable verified: $EXECUTABLE"
+          plutil -lint "$PLIST"
 
-          if [ ! -f "$APP_PATH/$EXECUTABLE" ]; then
-            echo "ERROR: App executable missing: $EXECUTABLE"
-            exit 1
-          fi
+      - name: Package and verify IPA
+        run: |
+          set -euo pipefail
 
-          rm -rf Payload PHIMHAYVIP-unsigned.ipa
-          mkdir -p Payload
+          rm -rf package Payload PHIMHAYVIP-unsigned.ipa
+          mkdir -p package/Payload
 
-          ditto "$APP_PATH" "Payload/PHIMHAYVIP.app"
+          cp -R \
+            build/Build/Products/Release-iphoneos/PHIMHAYVIP.app \
+            package/Payload/
 
-          /usr/bin/zip -qry PHIMHAYVIP-unsigned.ipa Payload
+          cd package
+          /usr/bin/zip -qry ../PHIMHAYVIP-unsigned.ipa Payload
+          cd ..
 
           unzip -t PHIMHAYVIP-unsigned.ipa
 
-          echo "IPA package created:"
+          unzip -l PHIMHAYVIP-unsigned.ipa \
+            | grep 'Payload/PHIMHAYVIP.app/Info.plist'
+
+          echo "IPA package:"
           ls -lh PHIMHAYVIP-unsigned.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: PHIMHAYVIP-unsigned-IPA
+          name: PHIMHAYVIP-IPA
           path: PHIMHAYVIP-unsigned.ipa
           if-no-files-found: error
           compression-level: 0
